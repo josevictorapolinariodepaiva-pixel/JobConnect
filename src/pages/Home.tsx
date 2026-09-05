@@ -437,7 +437,7 @@ function Home() {
 
             <span className="hero-badge-dot"></span>
 
-            Conectando talentos e oportunidades
+            Conectando talentos e oportunidades 🚀
 
           </span>
 
