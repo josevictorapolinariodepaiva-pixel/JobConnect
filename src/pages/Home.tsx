@@ -1,4 +1,3 @@
-
 import {
   useEffect,
   useRef,
@@ -83,6 +82,16 @@ function Home() {
 
     let lastProgress = -1
 
+    let metadataLoaded = false
+
+
+    const isMobile =
+      window.matchMedia('(max-width: 768px)').matches
+
+
+    /*
+      Atualiza o vídeo conforme o scroll
+    */
 
     const updateVideo = () => {
 
@@ -96,7 +105,8 @@ function Home() {
       if (
         videoElement &&
         section &&
-        videoElement.duration > 0
+        videoElement.duration > 0 &&
+        Number.isFinite(videoElement.duration)
       ) {
 
         const rect =
@@ -120,6 +130,11 @@ function Home() {
             : 0
 
 
+        /*
+          Atualiza o progresso somente
+          quando existe mudança suficiente
+        */
+
         if (
           Math.abs(
             progress - lastProgress
@@ -133,6 +148,10 @@ function Home() {
         }
 
 
+        /*
+          Calcula o momento do vídeo
+        */
+
         targetTime =
           progress *
           Math.max(
@@ -141,22 +160,45 @@ function Home() {
           )
 
 
-        smoothTime +=
-          (targetTime - smoothTime) * 0.12
+        /*
+          Suaviza o movimento
+        */
 
+        smoothTime +=
+          (targetTime - smoothTime) *
+          (isMobile ? 0.18 : 0.12)
+
+
+        /*
+          Evita fazer milhares de alterações
+          desnecessárias no currentTime
+        */
 
         if (
           Math.abs(
             videoElement.currentTime -
             smoothTime
-          ) > 0.01
+          ) > 0.015
         ) {
 
-          videoElement.currentTime =
-            smoothTime
+          try {
+
+            videoElement.currentTime =
+              smoothTime
+
+          } catch {
+            /*
+              Alguns navegadores móveis podem
+              bloquear temporariamente o seek.
+            */
+          }
 
         }
 
+
+        /*
+          Mostra o conteúdo final
+        */
 
         if (progress >= 0.82) {
 
@@ -177,7 +219,11 @@ function Home() {
     }
 
 
-    const handleLoadedMetadata = () => {
+    /*
+      Inicializa o vídeo
+    */
+
+    const initializeVideo = () => {
 
       const videoElement =
         videoRef.current
@@ -188,19 +234,113 @@ function Home() {
       }
 
 
-      videoElement.pause()
+      if (
+        metadataLoaded &&
+        videoElement.duration > 0
+      ) {
+
+        videoElement.pause()
+
+        smoothTime = 0
+
+        targetTime = 0
+
+        try {
+
+          videoElement.currentTime = 0
+
+        } catch {
+          // Ignora erro de seek em navegadores móveis
+        }
 
 
-      smoothTime = 0
+        /*
+          No celular, fazemos um play inicial
+          silencioso para garantir que o navegador
+          libere o processamento do vídeo.
+        */
 
-      targetTime = 0
+        if (isMobile) {
+
+          const playPromise =
+            videoElement.play()
 
 
-      videoElement.currentTime = 0.001
+          if (playPromise !== undefined) {
+
+            playPromise
+              .then(() => {
+
+                videoElement.pause()
+
+                try {
+
+                  videoElement.currentTime = 0
+
+                } catch {
+                  // Ignora erro de seek
+                }
+
+              })
+              .catch(() => {
+
+                /*
+                  Se o navegador bloquear o play,
+                  continuamos normalmente com o
+                  controle por scroll.
+                */
+
+              })
+
+          }
+
+        }
 
 
-      animationId =
-        requestAnimationFrame(updateVideo)
+        animationId =
+          requestAnimationFrame(updateVideo)
+
+      }
+
+    }
+
+
+    /*
+      Quando os metadados estiverem disponíveis
+    */
+
+    const handleLoadedMetadata = () => {
+
+      metadataLoaded = true
+
+      initializeVideo()
+
+    }
+
+
+    /*
+      Quando os dados iniciais do vídeo
+      estiverem disponíveis
+    */
+
+    const handleLoadedData = () => {
+
+      metadataLoaded = true
+
+      initializeVideo()
+
+    }
+
+
+    /*
+      Quando o vídeo puder começar a tocar
+    */
+
+    const handleCanPlay = () => {
+
+      metadataLoaded = true
+
+      initializeVideo()
 
     }
 
@@ -211,16 +351,35 @@ function Home() {
 
     if (videoElement) {
 
-      if (videoElement.readyState >= 1) {
+      /*
+        Caso o navegador já tenha carregado
+        os metadados
+      */
 
-        handleLoadedMetadata()
+      if (
+        videoElement.readyState >= 1 &&
+        videoElement.duration > 0
+      ) {
+
+        metadataLoaded = true
+
+        initializeVideo()
 
       } else {
 
         videoElement.addEventListener(
           'loadedmetadata',
-          handleLoadedMetadata,
-          { once: true }
+          handleLoadedMetadata
+        )
+
+        videoElement.addEventListener(
+          'loadeddata',
+          handleLoadedData
+        )
+
+        videoElement.addEventListener(
+          'canplay',
+          handleCanPlay
         )
 
       }
@@ -228,11 +387,62 @@ function Home() {
     }
 
 
+    /*
+      Caso o vídeo demore para carregar,
+      tenta iniciar novamente depois de um
+      pequeno intervalo.
+    */
+
+    const retryTimer =
+      window.setTimeout(() => {
+
+        const currentVideo =
+          videoRef.current
+
+        if (
+          currentVideo &&
+          currentVideo.readyState >= 1 &&
+          currentVideo.duration > 0
+        ) {
+
+          metadataLoaded = true
+
+          initializeVideo()
+
+        }
+
+      }, 1000)
+
+
     return () => {
 
       cancelAnimationFrame(
         animationId
       )
+
+      clearTimeout(
+        retryTimer
+      )
+
+
+      if (videoElement) {
+
+        videoElement.removeEventListener(
+          'loadedmetadata',
+          handleLoadedMetadata
+        )
+
+        videoElement.removeEventListener(
+          'loadeddata',
+          handleLoadedData
+        )
+
+        videoElement.removeEventListener(
+          'canplay',
+          handleCanPlay
+        )
+
+      }
 
     }
 
@@ -329,6 +539,7 @@ function Home() {
             src={video}
             muted
             playsInline
+            webkit-playsinline="true"
             preload="auto"
           />
 
@@ -703,6 +914,7 @@ function Home() {
 
         )}
 
+
       </section>
 
 
@@ -780,4 +992,3 @@ function Home() {
 
 
 export default Home
-
